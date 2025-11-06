@@ -3,3 +3,7 @@ uvicorn
 aiohttp
 pydantic
 python-dotenv
+requests
+beautifulsoup4
+pyjson5
+playwright

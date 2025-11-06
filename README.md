@@ -34,7 +34,13 @@
 pip install -r requirements.txt
 ```
 
-2. **Try the CLI:**
+2. **Install Playwright browsers (required for downloads):**
+
+```bash
+playwright install chromium
+```
+
+3. **Try the CLI:**
 
 ```bash
 # Search uses Amazon Music by default
@@ -45,7 +51,7 @@ python cli.py search "daft punk" --limit 5
 python cli.py services
 ```
 
-3. **Start the API:**
+4. **Start the API:**
 
 ```bash
 python api_server.py
@@ -142,7 +148,13 @@ REQUEST_TIMEOUT=30
 
 ## How It Works
 
-This tool uses web scraping to interact with Lucida.to's web interface. No service credentials required!
+This tool uses browser automation (Playwright) to interact with Lucida.to's web interface for downloads, and web scraping for search. No service credentials required!
+
+**Technical Details:**
+
+- **Search**: Uses HTTP requests + BeautifulSoup to parse Lucida.to search results
+- **Downloads**: Uses Playwright to automate a headless Chrome browser that clicks the download button on Lucida.to
+- **Rate Limiting**: Enterprise-grade sliding window algorithm (30 req/min, 500 req/hour, 2s min delay)
 
 ## Disclaimer
 

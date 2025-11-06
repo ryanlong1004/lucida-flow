@@ -22,6 +22,9 @@
 # Install all dependencies
 pip install -r requirements.txt
 
+# Install Playwright browsers (required for downloads)
+playwright install chromium
+
 # Or install separately
 pip install -r requirements-cli.txt  # CLI only
 pip install -r requirements-api.txt  # API only

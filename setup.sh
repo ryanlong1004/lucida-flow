@@ -34,6 +34,12 @@ pip install -q -r requirements.txt
 echo "✓ Dependencies installed"
 echo ""
 
+# Install Playwright browsers
+echo "🌐 Installing Playwright browsers (required for downloads)..."
+playwright install chromium
+echo "✓ Playwright browsers installed"
+echo ""
+
 # Create .env if it doesn't exist
 if [ ! -f ".env" ]; then
     cp .env.python.example .env

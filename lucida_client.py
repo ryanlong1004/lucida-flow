@@ -443,7 +443,7 @@ class LucidaClient:
         self, url: str, output_path: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Download a track from Lucida.to
+        Download a track from Lucida.to using browser automation
 
         Args:
             url: URL to the track (from Tidal, Qobuz, etc.)
@@ -452,69 +452,96 @@ class LucidaClient:
         Returns:
             Dictionary containing download result and file path
         """
+        from playwright.sync_api import sync_playwright
+
         self._rate_limit()
 
         try:
-            # First, get the download page
-            response = self.session.get(
-                self.base_url, params={"url": url}, timeout=self.timeout
-            )
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.content, "html.parser")
-
-            # Find the download link
-            download_link = None
-            download_button = soup.find("a", class_=re.compile(r"download"))
-            if download_button and download_button.get("href"):
-                download_link = urljoin(self.base_url, download_button["href"])
-
-            # Alternative: look for direct download links
-            if not download_link:
-                for link in soup.find_all("a", href=True):
-                    if (
-                        "download" in link["href"].lower()
-                        or link.get_text().lower() == "download"
-                    ):
-                        download_link = urljoin(self.base_url, link["href"])
-                        break
-
-            if not download_link:
-                return {"success": False, "error": "Could not find download link"}
-
-            # Download the file
-            self._rate_limit()
-            download_response = self.session.get(
-                download_link, stream=True, timeout=self.timeout
-            )
-            download_response.raise_for_status()
-
-            # Determine filename
-            filename = self._get_filename_from_response(download_response, url)
-
+            # Set up download directory
             if output_path:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-                filepath = output_path
+                download_dir = os.path.dirname(os.path.abspath(output_path))
+                os.makedirs(download_dir, exist_ok=True)
             else:
-                filepath = os.path.join("./downloads", filename)
-                os.makedirs("./downloads", exist_ok=True)
+                download_dir = os.path.abspath("./downloads")
+                os.makedirs(download_dir, exist_ok=True)
 
-            # Write file
-            with open(filepath, "wb") as f:
-                for chunk in download_response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+            with sync_playwright() as p:
+                # Launch browser in headless mode
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(accept_downloads=True)
+                page = context.new_page()
 
-            return {
-                "success": True,
-                "filepath": filepath,
-                "size": os.path.getsize(filepath),
-            }
+                # Navigate to Lucida with the track URL
+                lucida_url = f"{self.base_url}?url={url}"
+                page.goto(lucida_url, wait_until="networkidle", timeout=60000)
 
-        except requests.RequestException as e:
-            return {"success": False, "error": str(e)}
-        except IOError as e:
-            return {"success": False, "error": f"File write error: {str(e)}"}
+                # Wait for the download button to appear
+                page.wait_for_selector(
+                    "button.download-button, button:has-text('download')", timeout=30000
+                )
+
+                # Set up download handler
+                download_info: Dict[str, Optional[str]] = {"path": None, "error": None}
+
+                def handle_download(download):
+                    try:
+                        # Get suggested filename
+                        suggested_filename = download.suggested_filename
+
+                        # Determine final filepath
+                        if output_path:
+                            filepath = output_path
+                        else:
+                            filepath = os.path.join(download_dir, suggested_filename)
+
+                        # Save the download
+                        download.save_as(filepath)
+                        download_info["path"] = filepath
+                    except Exception as e:
+                        download_info["error"] = str(e)
+
+                # Listen for download event
+                page.on("download", handle_download)
+
+                # Click the download button
+                download_button = page.locator(
+                    "button.download-button, button:has-text('download')"
+                ).first
+                download_button.click()
+
+                # Wait for download to start
+                page.wait_for_timeout(2000)
+
+                # Wait for download to finish
+                max_wait = 300  # 5 minutes max
+                waited = 0
+                while (
+                    download_info["path"] is None
+                    and download_info["error"] is None
+                    and waited < max_wait
+                ):
+                    page.wait_for_timeout(1000)
+                    waited += 1
+
+                browser.close()
+
+                if download_info["error"]:
+                    return {"success": False, "error": download_info["error"]}
+
+                if download_info["path"]:
+                    return {
+                        "success": True,
+                        "filepath": download_info["path"],
+                        "size": os.path.getsize(download_info["path"]),
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": "Download timed out or did not start",
+                    }
+
+        except Exception as e:
+            return {"success": False, "error": f"Browser automation error: {str(e)}"}
 
     def _get_filename_from_response(self, response, url: str) -> str:
         """Extract filename from response headers or generate from URL"""
