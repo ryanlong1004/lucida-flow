@@ -6,17 +6,19 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 with open("requirements.txt", "r", encoding="utf-8") as fh:
-    requirements = [line.strip() for line in fh if line.strip() and not line.startswith("#")]
+    requirements = [
+        line.strip() for line in fh if line.strip() and not line.startswith("#")
+    ]
 
 setup(
     name="lucida-flow",
     version="1.0.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Ryan Long",
+    author_email="ryanlong1004@users.noreply.github.com",
     description="CLI tool and API for downloading music from streaming services via Lucida.to",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/lucida_flow",
+    url="https://github.com/ryanlong1004/lucida-flow",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
