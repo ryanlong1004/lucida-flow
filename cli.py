@@ -165,6 +165,41 @@ def services():
 
 
 @cli.command()
+def stats():
+    """Show rate limiter statistics"""
+    console.print("\n[bold cyan]Rate Limiter Statistics:[/bold cyan]\n")
+
+    client = LucidaClient()
+    stats = client.get_rate_limit_stats()
+
+    table = Table(title="Request Stats")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+
+    # Current usage
+    table.add_row("Requests (last minute)", str(stats["requests_last_minute"]))
+    table.add_row("Requests (last hour)", str(stats["requests_last_hour"]))
+    table.add_row("Total tracked requests", str(stats["total_requests"]))
+    table.add_row("Consecutive errors", str(stats["consecutive_errors"]))
+
+    console.print(table)
+    console.print()
+
+    # Limits table
+    limits_table = Table(title="Rate Limits")
+    limits_table.add_column("Limit Type", style="cyan")
+    limits_table.add_column("Value", style="yellow")
+
+    limits = stats["limits"]
+    limits_table.add_row("Per minute", str(limits["per_minute"]))
+    limits_table.add_row("Per hour", str(limits["per_hour"]))
+    limits_table.add_row("Min delay (seconds)", str(limits["min_delay_seconds"]))
+
+    console.print(limits_table)
+    console.print()
+
+
+@cli.command()
 def config():
     """Show current configuration"""
     console.print("\n[bold cyan]Current Configuration:[/bold cyan]\n")

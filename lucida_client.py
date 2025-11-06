@@ -10,12 +10,125 @@ import re
 import os
 from urllib.parse import urljoin, quote
 import time
+from collections import deque
+from datetime import datetime, timedelta
+
+
+class RateLimiter:
+    """
+    Advanced rate limiter with sliding window and exponential backoff.
+    Ensures we never exceed Lucida.to's request limits.
+    """
+
+    def __init__(
+        self,
+        requests_per_minute: int = 30,
+        requests_per_hour: int = 500,
+        min_delay: float = 2.0,
+    ):
+        self.requests_per_minute = requests_per_minute
+        self.requests_per_hour = requests_per_hour
+        self.min_delay = min_delay
+
+        # Track request timestamps
+        self.request_times = deque(maxlen=requests_per_hour)
+        self.last_request_time = 0
+
+        # Exponential backoff for errors
+        self.consecutive_errors = 0
+        self.max_backoff = 300  # 5 minutes max
+
+    def wait(self):
+        """Wait if necessary to respect rate limits"""
+        current_time = time.time()
+
+        # Enforce minimum delay between requests
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.min_delay:
+            sleep_time = self.min_delay - time_since_last
+            time.sleep(sleep_time)
+            current_time = time.time()
+
+        # Check per-minute limit (sliding window)
+        one_minute_ago = current_time - 60
+        recent_requests = sum(1 for t in self.request_times if t > one_minute_ago)
+        if recent_requests >= self.requests_per_minute:
+            # Calculate wait time until oldest request expires
+            oldest_in_window = min(
+                (t for t in self.request_times if t > one_minute_ago),
+                default=one_minute_ago,
+            )
+            wait_time = 60 - (current_time - oldest_in_window) + 1
+            print(f"Rate limit: waiting {wait_time:.1f}s (per-minute limit)")
+            time.sleep(wait_time)
+            current_time = time.time()
+
+        # Check per-hour limit
+        one_hour_ago = current_time - 3600
+        hour_requests = sum(1 for t in self.request_times if t > one_hour_ago)
+        if hour_requests >= self.requests_per_hour:
+            oldest_in_hour = min(
+                (t for t in self.request_times if t > one_hour_ago),
+                default=one_hour_ago,
+            )
+            wait_time = 3600 - (current_time - oldest_in_hour) + 1
+            print(f"Rate limit: waiting {wait_time / 60:.1f}m (per-hour limit)")
+            time.sleep(wait_time)
+            current_time = time.time()
+
+        # Exponential backoff for consecutive errors
+        if self.consecutive_errors > 0:
+            backoff = min(
+                self.min_delay * (2**self.consecutive_errors),
+                self.max_backoff,
+            )
+            print(
+                f"Exponential backoff: waiting {backoff:.1f}s "
+                f"(error #{self.consecutive_errors})"
+            )
+            time.sleep(backoff)
+            current_time = time.time()
+
+        # Record this request
+        self.request_times.append(current_time)
+        self.last_request_time = current_time
+
+    def record_success(self):
+        """Reset error counter on successful request"""
+        self.consecutive_errors = 0
+
+    def record_error(self):
+        """Increment error counter for backoff calculation"""
+        self.consecutive_errors += 1
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get current rate limiter statistics"""
+        current_time = time.time()
+        one_minute_ago = current_time - 60
+        one_hour_ago = current_time - 3600
+
+        return {
+            "requests_last_minute": sum(
+                1 for t in self.request_times if t > one_minute_ago
+            ),
+            "requests_last_hour": sum(
+                1 for t in self.request_times if t > one_hour_ago
+            ),
+            "consecutive_errors": self.consecutive_errors,
+            "total_requests": len(self.request_times),
+        }
 
 
 class LucidaClient:
     """Client for interacting with Lucida.to"""
 
-    def __init__(self, base_url: str = "https://lucida.to", timeout: int = 30):
+    def __init__(
+        self,
+        base_url: str = "https://lucida.to",
+        timeout: int = 30,
+        requests_per_minute: int = 30,
+        requests_per_hour: int = 500,
+    ):
         self.base_url = base_url
         self.timeout = timeout
         self.session = requests.Session()
@@ -24,16 +137,32 @@ class LucidaClient:
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
         )
-        self.last_request_time = 0
-        self.rate_limit_delay = 1.0  # seconds between requests
+
+        # Initialize advanced rate limiter
+        self.rate_limiter = RateLimiter(
+            requests_per_minute=requests_per_minute,
+            requests_per_hour=requests_per_hour,
+            min_delay=2.0,  # Conservative 2 second minimum delay
+        )
 
     def _rate_limit(self):
-        """Implement basic rate limiting"""
-        current_time = time.time()
-        time_since_last_request = current_time - self.last_request_time
-        if time_since_last_request < self.rate_limit_delay:
-            time.sleep(self.rate_limit_delay - time_since_last_request)
-        self.last_request_time = time.time()
+        """Apply rate limiting before making requests"""
+        self.rate_limiter.wait()
+
+    def _handle_response(self, response):
+        """Handle response and update rate limiter state"""
+        if response.status_code == 429:  # Too Many Requests
+            self.rate_limiter.record_error()
+            retry_after = response.headers.get("Retry-After", 60)
+            print(f"Rate limited by server! Waiting {retry_after}s")
+            time.sleep(int(retry_after))
+            raise requests.exceptions.HTTPError("Rate limited")
+        elif response.status_code >= 500:
+            self.rate_limiter.record_error()
+        else:
+            self.rate_limiter.record_success()
+
+        return response
 
     def search(self, query: str, service: str, limit: int = 10) -> Dict[str, Any]:
         """
@@ -92,6 +221,7 @@ class LucidaClient:
             search_url = f"{self.base_url}/search?{param_string}"
 
             response = self.session.get(search_url, timeout=self.timeout)
+            response = self._handle_response(response)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, "html.parser")
@@ -433,3 +563,20 @@ class LucidaClient:
             "yandex_music",
             "spotify",
         ]
+
+    def get_rate_limit_stats(self) -> Dict[str, Any]:
+        """
+        Get current rate limiter statistics
+
+        Returns:
+            Dictionary with rate limit stats and request counts
+        """
+        stats = self.rate_limiter.get_stats()
+        return {
+            **stats,
+            "limits": {
+                "per_minute": self.rate_limiter.requests_per_minute,
+                "per_hour": self.rate_limiter.requests_per_hour,
+                "min_delay_seconds": self.rate_limiter.min_delay,
+            },
+        }
