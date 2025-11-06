@@ -1,6 +1,15 @@
-# Lucida Flow
-
-A Python CLI tool and REST API for downloading high-quality music from various streaming services using [Lucida.to](https://lucida.to), with Amazon Music as the default service.
+<div align="center">
+  <img src="lucida_flow.png" alt="Lucida Flow Logo" width="600"/>
+  
+  # Lucida Flow
+  
+  A Python CLI tool and REST API for downloading high-quality music from various streaming services using [Lucida.to](https://lucida.to), with Amazon Music as the default service.
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+  [![GitHub Stars](https://img.shields.io/github/stars/ryanlong1004/lucida-flow.svg)](https://github.com/ryanlong1004/lucida-flow/stargazers)
+  
+</div>
 
 ## Features
 
